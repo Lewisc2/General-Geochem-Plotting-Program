@@ -1,0 +1,677 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Aug 29 08:54:22 2022
+
+@author: ctlewis
+"""
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Aug 22 07:35:15 2022
+
+@author: ctlewis
+plotting program
+
+"""
+
+# import dependable libraries
+import base64
+import io
+import os
+import dash
+from dash.dependencies import Input, Output, State
+from dash import dcc, html, dash_table, Dash, ctx
+import dash_bootstrap_components as dbc
+import dash_daq as daq
+import plotly.express as px
+import pandas as pd
+import plotly.graph_objects as go
+# import numpy as np
+
+
+# initiate the app
+app = Dash(__name__, external_stylesheets=[dbc.themes.SOLAR])  # using solar theme
+
+# global element list - defines required input
+elements_all = ['sio2','al2o3','feo','mgo','cao','na2o','k2o','tio2','p2o5','mno','Ni','Cr','Sc','V','Ba','Rb','Sr','Zr','Y',
+               'Nb','Ga','Cu','Zn','Co','Pb','Th','U','La','Ce','Pr','Nd','Sm','Eu','Gd','Tb','Dy','Ho','Er','Tm','Yb','Lu',
+               'Hf','Ta','Cs','P','K','h2o','co2','so2','S','h2s','so4']
+
+
+# # start building components
+# upload bar is an empty container that allows a drag and drop or a manual file upload
+# with the dash core component (dcc) nam,ed upload
+uploadbar = dcc.Upload(
+    id='uploaded_data',
+    children=html.Div([
+        'Drag & Drop or ',
+        html.A('Select File')
+        ]),
+    style={
+        'width': '40%',
+        'height': '40px',
+        'lineheight': '60px',
+        'borderWidth': '1px',
+        'borderStyle': 'dashed',
+        'textAlign': 'center'
+        },
+    multiple=True)
+
+title = html.H1(children='General Geochem Plotting Program') # put in a title
+datatable = html.Div(id='output_table') # empty container for the datatable - will be placed at bottom of layout
+dropdowns = html.Div(id='mainchart_dropdowns') # empty container for dropdowns controlling the main graph. Fed by parse contents
+
+# main graph
+mygraph = dcc.Graph(id='singleplot',figure={}) # intiate empty figure
+updatebutton = html.Button(id='updatebutton',children='Update Graph') # button that triggers the callback for main graph
+# another button that triggers the callback but carries out a different function if this is hte one that triggers callback
+# controlled by ctx
+addbutton = html.Button(id='add_data', children='Add Data')
+addfield = html.Button(id='add_field', children='Add Field')
+plotselection = dcc.RadioItems(id='plotselector',options=['Scatter', 'Line']) # radio buttons to define type of graph
+# slider to control symbol size. (start, stop, step between, intialvalue, id=id)
+sizeselection = dcc.Slider(4,18,step=1,value=12,id='sizeselector')
+x_label = dcc.Input(id='x_label',type='text',placeholder='X-Label') # input box for xlabel
+y_label = dcc.Input(id='y_label',type='text',placeholder='Y-Label') # input box for y label
+legend_name_add = dcc.Input(id='legend_name_add',type='text',placeholder='Legend Name') # Legend name for data field (triggered by addbutton)
+col_input = dcc.Input(id='col_input',type='text',placeholder='Column Name') # as above
+col_value = dcc.Input(id='col_value',type='text',placeholder='Identifier') # as above
+
+# secondary graph
+reechart = dcc.Graph(id='ree_spider_plot',figure={}) # empty figure
+updatebutton_two = html.Button(id='updatebutton_two',children='Update Trace Diagram') # as above
+plotselection_two = dcc.RadioItems(id='plotselector_two',options=['REE', 'Spider (RG03)', 'Spider (Compat.)']) # as above
+sizeselection_two = dcc.Slider(1,10,step=1,value=1,id='sizeselector_two') # as above - note size=1 is no symbol
+# radioitem that gives options on how to normalize the REE
+normalizationselection = dcc.RadioItems(id='normselector',options=['Chondrite', 'Primitive Mantle', 'Eroded Earth', 'MORB'])
+# make a checklist with avaialable options. Value is starting. Inline makes the list horizontal
+element_checklist = dcc.Checklist(['Cs', 'Rb', 'Ba', 'Th', 'U', 'Nb', 'Ta', 'K', 'La', 'Ce', 'Pb', 'Pr', 'Sr', 'Nd', 'Sm', 'Zr',
+                                   'Hf', 'Eu', 'Gd','Tb', 'Dy', 'Y', 'Ho', 'Er', 'Tm', 'Yb', 'Lu'],
+                                  value=['La', 'Ce', 'Pr', 'Nd', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy', 'Ho', 'Er', 'Tm', 'Yb', 'Lu'],
+                                  inline=True, id='elementchecklist')
+# dropdown to select how line objects will be colored. populated by callback function
+tracediagram_color = dcc.Dropdown(id='tracecolor',options=[],clearable=True)
+x_label_two = dcc.Input(id='x_label_two',type='text',placeholder='X-Label') # as above
+y_label_two = dcc.Input(id='y_label_two',type='text',placeholder='Y-Label') # as above
+
+
+# statistical graph
+stats_graph = dcc.Graph(id='stats_graph',figure={}) # as above
+updatebutton_stats = html.Button(id='updatebutton_stats',children='Update Stats Graph') # as above
+plotselection_stats = dcc.RadioItems(id='plotselector_stats',options=['Histogram', 'Cumulative', 'Violin', 'Box Plot',
+                                                                      '2D Histogram']) # as above
+stats_dropdowns = html.Div(id='stats_dropdowns') # as above
+x_label_stats = dcc.Input(id='x_label_stats',type='text',placeholder='X-Label') # as above
+y_label_stats = dcc.Input(id='y_label_stats',type='text',placeholder='Y-Label') # as above
+hist_norm = dcc.RadioItems(id='hist_norm',options=['percent', 'probability', 'density', 'probability density']) # as above
+addbutton_stats = html.Button(id='addbutton_stats', children='Add Data')
+legend_name_add_stats = dcc.Input(id='legend_name_add_stats',type='text',placeholder='Legend Name') # Legend name for data field (triggered by addbutton)
+col_input_stats = dcc.Input(id='col_input_stats',type='text',placeholder='Column Name') # as above
+col_value_stats = dcc.Input(id='col_value_stats',type='text',placeholder='Identifier') # as above
+
+color_picker_face = daq.ColorPicker(id='color_picker_face', label='Choose Marker Color', 
+                                    value={"hex": "#FF8000"}, size=160)
+color_picker_edge = daq.ColorPicker(id='color_picker_edge', label='Choose Marker Edge Color', 
+                                    value={"hex": "#000000"}, size=160)
+
+
+# the layout controls how the page is displayed. The entire thing is in the dbc.Container
+# within the container are columns and rows. EAch row contains a list of columns, which themselves contain a list of the
+# components initiated above
+# all dbc.html are html functions that usually relate to containers, text, or page formatting.
+# width arguments control the widht of that column within that row
+# max row width is 12. In the event 12 is exceeded, the component object gets placed below the last listed component object
+app.layout = dbc.Container([
+    dbc.Row([
+        dbc.Col([title,mygraph],width=8),
+        dbc.Col([dropdowns,updatebutton],width=4)
+        ],
+        justify='left'),
+    dbc.Row([
+        dbc.Col([html.H5('Add Data'), col_input, col_value, legend_name_add, addbutton,addfield]),
+        dbc.Col([html.Div(color_picker_face)]),
+        dbc.Col([html.Div(color_picker_edge)]),
+        dbc.Col([html.P('Graph Type'),plotselection,html.P('Symbol Size'),sizeselection,x_label, y_label])
+        ],
+        justify='left'),
+    dbc.Row([
+        html.Hr(),
+        html.H2(children='REE and Spider Plots'),
+        dbc.Col([element_checklist,reechart,html.P('Color By:'),tracediagram_color],width=9),
+        dbc.Col([
+            html.P('Trace Diagram Selections'),
+            updatebutton_two,
+            html.Div([x_label_two, y_label_two]),
+            plotselection_two,html.P('Normalize to:'),normalizationselection,sizeselection_two],width=3)
+            ],
+        justify='left'),
+    dbc.Row([
+        html.Hr(),
+        html.H2(children='Statisitcal Charts'),
+    dbc.Row([
+        dbc.Col([stats_graph],width=7),
+        dbc.Col([stats_dropdowns,updatebutton_stats,x_label_stats, y_label_stats],width=4)
+        ],
+        justify='left'),
+    dbc.Row([
+        dbc.Col([html.H5('Add Data'), col_input_stats, col_value_stats,legend_name_add_stats,addbutton_stats]),
+        dbc.Col([]),
+        dbc.Col([html.P('Histogram: Normalization - Leave blank if None Desired'),hist_norm,
+                 html.P('Graph Type'),plotselection_stats])
+        ],
+        justify='left'),
+        ]),
+    dbc.Row([
+        html.Hr(),
+        dbc.Col(uploadbar)
+        ],
+        justify = 'left'),
+    dbc.Row([
+        dbc.Col(datatable)],
+        justify='left')
+        ],
+    fluid = True)
+
+# define a function that takes the input dataframe and loads the data into the browser for storage.
+# The data is accessed in the callback functions by loading the State() of the stored ata.
+# returns the stored data (stored int he browser) and a datatable displayed on the page
+def parse_contents(contents, filename):
+    content_type, content_string = contents.split(',')
+
+    decoded = base64.b64decode(content_string)
+    try:
+        if 'csv' in filename:
+            # Assume that the user uploaded a CSV file
+            df = pd.read_csv(
+                io.StringIO(decoded.decode('utf-8')))
+        elif 'xls' in filename:
+            # Assume that the user uploaded an excel file
+            df = pd.read_excel(io.BytesIO(decoded))
+    except Exception as e:
+        print(e)
+        return html.Div([
+            'There was an error processing this file.'
+        ])
+# return:
+    # html.H5 returns the file name of hte input file name
+    # the date is last modified
+    # we also return a sentence that sits above the dropdown
+    # then, we have our dash core component dropdown. the args include a dictionary for a label / value that are looped through
+    # the columnsin the spreadsheet
+    # we also use storedata - this stores the dataframe into hte users browser:
+        # this is waht is used to make a graph. Make sure you do not store more than 2-3mb in the browser (5-7 for computers)
+    # again, this is all the children
+    
+    return html.Div([
+        
+        html.Hr(),
+        
+        html.H5(filename),
+        
+        dash_table.DataTable(
+            data=df.to_dict('records'),
+            columns=[{'name': i, 'id': i} for i in df.columns],
+            page_size=10
+        ),
+        dcc.Store(id='stored_data', data=df.to_dict('records')),
+    ])
+
+# similar to above but feeds the main chart dropdowns through the callback below. The callback is triggered by a
+# data upload
+def get_maindropdowns(contents, filename):
+    content_type, content_string = contents.split(',')
+
+    decoded = base64.b64decode(content_string)
+    try:
+        if 'csv' in filename:
+            # Assume that the user uploaded a CSV file
+            df = pd.read_csv(
+                io.StringIO(decoded.decode('utf-8')))
+        elif 'xls' in filename:
+            # Assume that the user uploaded an excel file
+            df = pd.read_excel(io.BytesIO(decoded))
+    except Exception as e:
+        print(e)
+        return html.Div([
+            'There was an error processing this file.'
+        ])
+    
+    
+    return  html.Div([html.P('X-Axis'),
+            dcc.Dropdown(id='xaxis_variable',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True),
+            html.P('Y-Axis'),
+            dcc.Dropdown(id='yaxis_variable',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True),
+            html.P('Color By:'),
+            dcc.Dropdown(id='colorselector',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True),
+            html.P('Draw Symbols By:'),
+            dcc.Dropdown(id='symbolselector',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True),
+            html.P('X-Errors'),
+            dcc.Dropdown(id='xerror',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True),
+            html.P('Y-Errors'),
+            dcc.Dropdown(id='yerror',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True)
+            ])
+
+# similar to above but feeds the stats chart dropdowns through the callback below. The callback is triggered by a
+# data upload
+def get_statsdropdowns(contents, filename):
+    content_type, content_string = contents.split(',')
+
+    decoded = base64.b64decode(content_string)
+    try:
+        if 'csv' in filename:
+            # Assume that the user uploaded a CSV file
+            df = pd.read_csv(
+                io.StringIO(decoded.decode('utf-8')))
+        elif 'xls' in filename:
+            # Assume that the user uploaded an excel file
+            df = pd.read_excel(io.BytesIO(decoded))
+    except Exception as e:
+        print(e)
+        return html.Div([
+            'There was an error processing this file.'
+        ])
+    
+    
+    return  html.Div([html.P('X-Variable'),
+            dcc.Dropdown(id='stats_dropdown_x',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True),
+            html.P('Y-Variable'),
+            dcc.Dropdown(id='stats_dropdown_y',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True),
+            html.P('Color By:'),
+            dcc.Dropdown(id='color_stats',
+                          options=[{'label':x, 'value':x} for x in df.columns],
+                          clearable=True)
+            ])
+
+
+# in this callback decorator, we are taking three props from the data:
+    # contents, filename, and last_modified - see dcc docs
+@app.callback(Output('output_table', 'children'),
+              Output('mainchart_dropdowns', 'children'),
+              Output('stats_dropdowns', 'children'),
+              Input('uploaded_data', 'contents'),
+              State('uploaded_data', 'filename'))
+# in this function, we are saying if there is a list, we wil put them in a list, run the parse_contents function above
+# by looping through them. To put them onto the app, we return children below, which sends the function output to the 
+# html.Div(id=data-table) above
+def update_output(list_of_contents, list_of_names):
+    if list_of_contents is not None:
+        children = [
+            parse_contents(c, n) for c, n in
+            zip(list_of_contents, list_of_names)]
+        childrenII = [
+            get_maindropdowns(c, n) for c, n in
+            zip(list_of_contents, list_of_names)]
+        childrenIII = [
+            get_statsdropdowns(c, n) for c, n in
+            zip(list_of_contents, list_of_names)]
+        return children, childrenII, childrenIII
+
+
+# callback function that controls the main graph. Takes the Inputs and States in order then puts them into the function
+# defined below. Each of these has a unique identifier tied to the components initiated above
+@app.callback(Output('singleplot','figure'),
+              Input('updatebutton','n_clicks'),
+              Input('add_data', 'n_clicks'),
+              Input('add_field', 'n_clicks'),
+              State('stored_data','data'),
+              State('plotselector', 'value'),
+              State('xaxis_variable','value'),
+              State('yaxis_variable','value'),
+              State('colorselector', 'value'),
+              State('color_picker_face', 'value'),
+              State('color_picker_edge', 'value'),
+              State('symbolselector', 'value'),
+              State('sizeselector', 'value'),
+              State('xerror', 'value'),
+              State('yerror', 'value'),
+              State('x_label', 'value'),
+              State('y_label', 'value'),
+              State('singleplot', 'figure'),
+              State('legend_name_add', 'value'),
+              State('col_input', 'value'),
+              State('col_value', 'value'))
+def update_graph_type_and_vars(n, n_two, n_three, data, plottype, xvar, yvar, chosen_color, color_picker_face, 
+                               color_picker_edge, chosen_symbol,chosen_size, xerror, yerror, xlabel, ylabel, current_fig, 
+                               legend_name_add, col_input, col_value):
+    button_id = ctx.triggered_id if not None else 'No clicks yet' # determines which button triggered the callback
+    if button_id == 'updatebutton':
+        if plottype == 'Scatter':
+            if xlabel is None:
+                xlabel = xvar
+            else:
+                xlabel = xlabel
+            if ylabel is None:
+                ylabel = yvar
+            else:
+                ylabel = ylabel
+            fig = px.scatter(data, x=xvar, y=yvar, color=chosen_color, symbol=chosen_symbol, error_x=xerror, error_y=yerror,
+                              labels={xvar: xlabel, yvar: ylabel})
+            fig.update_traces(marker_size=chosen_size)
+            fig.update_layout(coloraxis_colorbar=dict(yanchor='top',y=1,x=-0.3,ticks='inside'))
+            if chosen_color is None:
+                fig.update_traces(marker={'color': list(color_picker_face.values())[0],
+                                          'line': {'color': list(color_picker_edge.values())[0],
+                                                   'width': 0.8}})
+            else:
+                pass
+            return fig
+        elif plottype == 'Line':
+            if xlabel is None:
+                xlabel = xvar
+            else:
+                xlabel = xlabel
+            if ylabel is None:
+                ylabel = yvar
+            else:
+                ylabel = ylabel
+            fig = px.line(data, x=xvar, y=yvar, color=chosen_color, symbol=chosen_symbol, error_x=xerror, error_y=yerror,
+                          labels={xvar: xlabel, yvar: ylabel})
+            fig.update_traces(marker_size=chosen_size)
+            fig.update_layout(coloraxis_colorbar=dict(yanchor='top',y=1,x=-0.3,ticks='inside'))
+            return fig
+        else:
+            return dash.no_update
+    elif button_id == 'add_data':
+        df_copy = pd.DataFrame.from_dict(data)
+        fig = go.Figure(current_fig)
+        if col_input and col_value is not None:
+            data_toadd = df_copy[df_copy[col_input] == col_value]
+            fig.add_trace(go.Scatter(x=data_toadd[xvar], y=data_toadd[yvar],mode='markers',name=legend_name_add,
+                                     marker_color=chosen_color))
+            fig.update_traces(marker_size=chosen_size)
+            if chosen_color is None:
+                fig.update_traces(marker={'color': list(color_picker_face.values())[0],
+                                          'line': {'color': list(color_picker_edge.values())[0],
+                                                   'width': 0.8}})
+            else:
+                pass            
+            return fig
+        elif col_input != 'Column Name':
+            fig.add_trace(go.Scatter(x=df_copy[xvar], y=df_copy[yvar],mode='markers',name=legend_name_add,
+                                     marker_color=chosen_color))
+            fig.update_traces(marker_size=chosen_size)
+            if chosen_color is None:
+                fig.update_traces(marker={'color': list(color_picker_face.values())[0],
+                                          'line': {'color': list(color_picker_edge.values())[0],
+                                                   'width': 0.8}})
+            else:
+                pass            
+            return fig
+        else:
+            return dash.no_update
+    elif button_id == 'add_field':
+        df_copy = pd.DataFrame.from_dict(data)
+        fig = go.Figure(current_fig)
+        if col_input and col_value is not None:
+            data_toadd = df_copy[df_copy[col_input] == col_value]
+            fig.add_trace(go.Scatter(x=data_toadd[xvar], y=data_toadd[yvar],mode='lines',fill='toself',name=legend_name_add,
+                                     fillcolor=chosen_color))
+            if chosen_color is None:
+                fig.update_traces(fillcolor=color_picker_face['hex'],line_color=color_picker_edge['hex'])
+            else:
+                pass            
+            return fig
+        elif col_input != 'Column Name':
+            fig.add_trace(go.Scatter(x=df_copy[xvar], y=df_copy[yvar],mode='lines',fill='toself',name=legend_name_add,
+                                     fillcolor=chosen_color))
+            if chosen_color is None:
+                fig.update_traces(fillcolor=color_picker_face['hex'],line_color=color_picker_edge['hex'])
+            else:
+                pass                  
+            return fig
+        else:
+            return dash.no_update
+    else:
+        return dash.no_update
+
+
+@app.callback(Output('ree_spider_plot','figure'),
+              Output('tracecolor', 'options'),
+              Input('updatebutton_two','n_clicks'),
+              Input('tracecolor', 'value'),
+              State('elementchecklist', 'value'),
+              State('stored_data','data'),
+              State('plotselector_two', 'value'),
+              State('normselector', 'value'),
+              State('sizeselector_two', 'value'),
+              State('x_label_two', 'value'),
+              State('y_label_two', 'value'))
+def update_graph_ree_spider_plot(n, chosen_color, elementselection, data, plottype, normselector, chosen_size,
+                                 xlabel, ylabel):
+    if n is None:
+        return dash.no_update
+    elif n is not None:
+        lit_vals = {'source': {0: 'Chondrite', 1: 'Primitive Mantle', 2: 'Eroded Earth', 3: 'MORB'},
+                    'Cs': {0: 0.19, 1: 0.021, 2: 0.015, 3: 0.05},
+                    'Rb': {0: 2.3, 1: 0.6, 2: 0.47, 3: 4.05},
+                    'Ba': {0: 2.41, 1: 6.6, 2: 5.03, 3: 43.4},
+                    'Th': {0: 0.029, 1: 0.08, 2: 0.063, 3: 0.491},
+                    'U': {0: 0.0074, 1: 0.02, 2: 0.0164, 3: 0.157},
+                    'Nb': {0: 0.24, 1: 0.66, 2: 0.45, 3: 6.44},
+                    'Ta': {0: 0.0136, 1: 0.037, 2: 0.031, 3: 0.417},
+                    'K': {0: 550, 1: 240, 2: 226, 3: 1237},
+                    'Pb': {0: 2.47, 1: 0.15, 2: 0.12, 3: 0.657},
+                    'Sr': {0: 7.25, 1: 19.9, 2: 17.48, 3: 138.0},
+                    'Zr': {0: 3.82, 1: 10.5, 2: 9.64, 3: 103.0},
+                    'Hf': {0: 0.103, 1: 0.283, 2: 0.269, 3: 2.62},
+                    'Y': {0: 1.57, 1: 4.3, 2: 4.12, 3: 32.4},
+                    'La': {0: 0.237, 1: 0.648, 2: 0.555, 3: 4.87},
+                    'Ce': {0: 0.613, 1: 1.68, 2: 1.53, 3: 13.1},
+                    'Pr': {0: 0.0928, 1: 0.254, 2: 0.235, 3: 2.08},
+                    'Nd': {0: 0.457, 1: 1.25, 2: 1.16, 3: 10.4},
+                    'Sm': {0: 0.148, 1: 0.406, 2: 0.389, 3: 3.37},
+                    'Eu': {0: 0.0563, 1: 0.154, 2: 0.147, 3: 1.2},
+                    'Gd': {0: 0.199, 1: 0.544, 2: 0.523, 3: 4.42},
+                    'Tb': {0: 0.0361, 1: 0.099, 2: 0.097, 3: 0.81},
+                    'Dy': {0: 0.246, 1: 0.674, 2: 0.666, 3: 5.28},
+                    'Ho': {0: 0.0546, 1: 0.149, 2: 0.149, 3: 1.14},
+                    'Er': {0: 0.16, 1: 0.438, 2: 0.44, 3: 3.3},
+                    'Tm': {0: 0.0247, 1: 0.068, 2: 0.068, 3: 0.49},
+                    'Yb': {0: 0.161, 1: 0.441, 2: 0.44, 3: 3.17},
+                    'Lu': {0: 0.0246, 1: 0.068, 2: 0.068, 3: 0.48}}
+        traceelements = ['Cs', 'Rb', 'Ba', 'Th', 'U', 'Nb', 'Ta', 'K', 'La', 'Ce', 'Pb', 'Pr', 'Sr', 'Nd', 'Sm', 'Zr', 'Hf', 'Eu', 'Gd',
+                      'Tb', 'Dy', 'Y', 'Ho', 'Er', 'Tm', 'Yb', 'Lu']
+        for key in traceelements:
+            if key not in elementselection:
+                lit_vals.pop(key,None)
+        lit_vals = pd.DataFrame.from_dict(lit_vals)
+        df_copy = pd.DataFrame.from_dict(data)
+        trace_df = df_copy
+        column_list = list(df_copy.columns)
+        trace_df['K'] = trace_df['k2o']*10000
+        trace_df = trace_df.filter(lit_vals[lit_vals['source'] == normselector].columns[1:])
+        trace_df_norm = pd.concat([trace_df, lit_vals[lit_vals['source'] == normselector]], ignore_index=True).drop(['source'],axis=1)
+        trace_df_norm = trace_df_norm.iloc[:-1].div(trace_df_norm.iloc[-1])
+        
+    
+        if plottype == 'REE':
+            ordered = ['La','Ce','Pr','Nd','Sm','Eu','Gd','Tb','Dy','Ho','Er','Tm','Yb','Lu']
+            ordered = [i for i in ordered if i in elementselection]
+            to_append = [i for i in column_list if i not in (ordered and elements_all)]
+            trace_df_norm = pd.concat([trace_df_norm,df_copy[to_append]], axis=1)
+            trace_df_norm = pd.melt(trace_df_norm, id_vars=to_append, var_name='element', value_name='concentration',
+                              value_vars= ordered)
+            trace_df_norm['element'] = pd.CategoricalIndex(trace_df_norm['element'], ordered=True, categories=ordered)
+            trace_df_norm = trace_df_norm.sort_values(by=['sample','element'])
+            output_options = [{'label':x, 'value':x} for x in trace_df_norm.columns]
+            fig = px.line(trace_df_norm, x='element', y='concentration', symbol='sample', color=chosen_color)
+            # fig = go.Figure(go.Scatter(x=trace_df_norm['element'], y=trace_df_norm['concentration'],
+            #                            mode='lines+markers',  marker_color=chosen_color))
+            fig.update_layout(xaxis_title=xlabel, yaxis_title=ylabel)
+            fig.update_traces(marker_size=chosen_size)
+            return fig, output_options
+        
+        elif plottype == 'Spider (RG03)':
+            ordered = ['Cs', 'Rb', 'Ba', 'Th', 'U', 'Nb', 'Ta', 'K', 'La', 'Ce', 'Pb', 'Pr', 'Sr', 'Nd', 'Sm', 'Zr', 'Hf', 'Eu', 'Gd',
+                          'Tb', 'Dy', 'Y', 'Ho', 'Er', 'Tm', 'Yb', 'Lu']
+            ordered = [i for i in ordered if i in elementselection]
+            to_append = [i for i in column_list if i not in (ordered and elements_all)]
+            trace_df_norm = pd.concat([trace_df_norm,df_copy[to_append]], axis=1)
+            trace_df_norm = pd.melt(trace_df_norm, id_vars=to_append, var_name='element', value_name='concentration',
+                              value_vars=ordered)
+            trace_df_norm['element'] = pd.CategoricalIndex(trace_df_norm['element'], ordered=True, categories=ordered)
+            trace_df_norm = trace_df_norm.sort_values(by=['sample','element'])
+            output_options = [{'label':x, 'value':x} for x in trace_df_norm.columns]
+            fig = px.line(trace_df_norm, x='element', y='concentration', symbol='sample', color=chosen_color)
+            fig.update_layout(xaxis_title=xlabel, yaxis_title=ylabel)
+            fig.update_traces(marker_size=chosen_size)
+            return fig, output_options
+        
+        elif plottype == 'Spider (Compat.)':
+            ordered = ['Cs', 'Rb', 'Ba', 'Th', 'U', 'Nb', 'Ta', 'K', 'La', 'Ce', 'Pb', 'Pr', 'Sr', 'Nd', 'Sm', 'Zr', 'Hf', 'Eu', 'Gd',
+                          'Tb', 'Dy', 'Y', 'Ho', 'Er', 'Tm', 'Yb', 'Lu']
+            ordered = [i for i in ordered if i in elementselection]
+            to_append = [i for i in column_list if i not in (ordered and elements_all)]
+            ordered = [i for i in ordered if i in elementselection]
+            trace_df_norm = pd.concat([trace_df_norm,df_copy[to_append]], axis=1)
+            trace_df_norm = pd.melt(trace_df_norm, id_vars=to_append, var_name='element', value_name='concentration',
+                              value_vars=elementselection)
+            trace_df_norm['element'] = pd.CategoricalIndex(trace_df_norm['element'], ordered=True, categories=ordered)
+            trace_df_norm = trace_df_norm.sort_values(by=['sample','element'])
+            output_options = [{'label':x, 'value':x} for x in trace_df_norm.columns]
+            fig = px.line(trace_df_norm, x='element', y='concentration', symbol='sample', color=chosen_color)
+            fig.update_layout(xaxis_title=xlabel, yaxis_title=ylabel)
+            fig.update_traces(marker_size=chosen_size)
+            return fig, output_options
+        else:
+            return dash.no_update
+
+
+@app.callback(Output('stats_graph','figure'),
+              Input('updatebutton_stats','n_clicks'),
+              Input('addbutton_stats', 'n_clicks'),
+              State('stored_data','data'),
+              State('plotselector_stats', 'value'),
+              State('stats_dropdown_x', 'value'),
+              State('stats_dropdown_y', 'value'),
+              State('color_stats', 'value'),
+              State('hist_norm', 'value'),
+              State('x_label_stats','value'),
+              State('y_label_stats','value'),
+              State('legend_name_add_stats', 'value'),
+              State('col_input_stats', 'value'),
+              State('col_value_stats', 'value'),
+              State('stats_graph', 'figure'))
+def def_statsgraph(n, n_two, data, plottype, xvar, yvar, chosen_color, norm_type, xlabel, ylabel, legend_name_add_stats,
+                   col_input_stats, col_value_stats, current_fig):
+    button_id = ctx.triggered_id if not None else 'No clicks yet' # determines which button triggered the callback
+    df_copy = pd.DataFrame.from_dict(data)
+    if xlabel is None:
+        xlabel = xvar
+    else:
+        xlabel = xlabel
+    if ylabel is None:
+        ylabel = yvar
+    else:
+        ylabel = ylabel
+        
+    if button_id == 'updatebutton_stats':
+        if n is None:
+            return dash.no_update
+        elif plottype == 'Histogram':
+            fig = px.histogram(data, x=xvar, color=chosen_color, barmode='overlay', opacity=0.75, labels={xvar: xlabel, yvar: ylabel},
+                               color_discrete_sequence=px.colors.qualitative.Dark2)
+            fig.update_traces(histnorm = norm_type)
+            return fig
+        elif plottype == 'Cumulative':
+            fig = go.Figure(go.Histogram(x=df_copy[xvar], cumulative_enabled=True, labels={xvar: xlabel, yvar: ylabel}))
+            fig.update_layout(barmode='overlay')
+            fig.update_traces(opacity=0.75)
+            return fig
+        elif plottype == 'Violin':
+            fig = px.violin(data, x=xvar, y=yvar, box=True, labels={xvar: xlabel, yvar: ylabel})
+            return fig
+        elif plottype =='Box Plot':
+            fig = px.box(data, x=xvar, y=yvar, labels={xvar: xlabel, yvar: ylabel})
+            return fig
+        elif plottype == '2D Histogram':
+            fig = px.density_heatmap(data, x=xvar, y=yvar, color_continuous_scale='magma', labels={xvar: xlabel, yvar: ylabel})
+            fig.update_traces(histnorm=norm_type)
+            return fig
+        else:
+            return dash.no_update
+        
+    elif button_id == 'addbutton_stats':
+        df_copy = pd.DataFrame.from_dict(data)
+        fig = go.Figure(current_fig)
+        if col_input_stats and col_value_stats is not None:
+            data_toadd = df_copy[df_copy[col_input_stats] == col_value_stats]
+            if plottype == 'Histogram':
+                fig.add_trace(go.Histogram(x=data_toadd[xvar],name=legend_name_add_stats))
+                fig.update_traces(histnorm = norm_type)
+                fig.update_layout(barmode='overlay')
+                fig.update_traces(opacity=0.75)
+                return fig
+            elif plottype == 'Cumulative':
+                fig.add_trace(go.Histogram(x=data_toadd[xvar], cumulative_enabled=True, name=legend_name_add_stats))
+                fig.update_layout(barmode='overlay')
+                fig.update_traces(opacity=0.75)
+                return fig
+            elif plottype == 'Violin':
+                fig.add_trace(go.Violin(x=data_toadd[xvar], y=data_toadd[yvar], box_visible=True,name=legend_name_add_stats))
+                return fig
+            elif plottype =='Box Plot':
+                fig.add_trace(go.Box(x=data_toadd[xvar], y=data_toadd[yvar],name=legend_name_add_stats))
+                return fig
+            elif plottype == '2D Histogram':
+                fig.add_trace(go.Histogram2d(x=data_toadd[xvar], y=data_toadd[yvar],
+                                             color_continuous_scale='magma',
+                                             name=legend_name_add_stats))
+                fig.update_trace(histnorm=norm_type)
+                return fig
+            else:
+                return dash.no_update
+        elif col_input_stats != 'Column Name':
+            if plottype == 'Histogram':
+                fig.add_trace(go.Histogram(x=df_copy[xvar], name=legend_name_add_stats))
+                fig.update_traces(histnorm = norm_type)
+                fig.update_layout(barmode='overlay')
+                fig.update_traces(opacity=0.75)
+                return fig
+            elif plottype == 'Cumulative':
+                fig.add_trace(go.Histogram(x=df_copy[xvar], cumulative_enabled=True,
+                                           name=legend_name_add_stats))
+                fig.update_layout(barmode='overlay')
+                fig.update_traces(opacity=0.75)
+                return fig
+            elif plottype == 'Violin':
+                fig.add_trace(go.Violin(x=df_copy[xvar], y=df_copy[yvar], box_visible=True,
+                                        name=legend_name_add_stats))
+                return fig
+            elif plottype =='Box Plot':
+                fig.add_trace(go.Box(x=df_copy[xvar], y=df_copy[yvar],
+                                     name=legend_name_add_stats))
+                return fig
+            elif plottype == '2D Histogram':
+                fig.add_trace(go.Histogram2d(x=df_copy[xvar], y=df_copy[yvar],
+                                             color_continuous_scale='magma',
+                                             name=legend_name_add_stats))
+                fig.update_trace(histnorm=norm_type)
+                return fig
+            else:
+                return dash.no_update
+    else:
+        return dash.no_update
+            
+    
+    
+if __name__ == '__main__':
+    app.run_server(port=8050,debug=True)
