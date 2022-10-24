@@ -42,26 +42,26 @@ Please note these, and indeed the entire program, is still underconstruction. I 
 ## Installation and Use
 The easiest way to get everything you need to run the program is to download the Anaconda Distirbution: https://www.anaconda.com/products/distribution/installation-success
 Once this is done, you can install and run the program locally with virtual environment. In your terminal, type:
-'''
+```
 git clone https://github.com/Lewisc2/General-Geochem-Plotting-Program
 cd /filepath/General-Geochem-Plotting-Program
 conda create -n General-Geochem-Plotting-Program python=3.9.7
 conda activate General-Geochem-Plotting-Program
 conda install --file requirements.txt
 spyder General-Geochem-Plotting-Program
-'''
+```
 
 To shutdown the program, in your terminal type
-'''
+```
 conda deactivate
-'''
+```
 
 Now that all the requirements are installed and the program is cloned, you can reactivate the program at anytime by using only the following lines from above
-'''
+```
 cd /filepath/General-Geochem-Plotting-Program
 conda activate General-Geochem-Plotting-Program
 spyder General-Geochem-Plotting-Program
-'''
+```
 
 Happy Plotting
 
